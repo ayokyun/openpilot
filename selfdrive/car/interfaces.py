@@ -116,7 +116,7 @@ class CarInterfaceBase():
         self.dp_last_modified = modified
       self.ts_last_check = ts
 
-  def create_common_events(self, cs_out, extra_gears=[], gas_resume_speed=-1, pcm_enable=True):
+  def create_common_events(self, cs_out, extra_gears=[], gas_resume_speed=-1):
     events = []
 
     if cs_out.doorOpen:
