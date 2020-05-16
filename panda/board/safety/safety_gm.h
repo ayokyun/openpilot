@@ -8,8 +8,8 @@
 const int GM_MAX_STEER = 300;
 const int GM_MAX_RT_DELTA = 128;          // max delta torque allowed for real time checks
 const uint32_t GM_RT_INTERVAL = 250000;    // 250ms between real time checks
-const int GM_MAX_RATE_UP = 7;
-const int GM_MAX_RATE_DOWN = 17;
+const int GM_MAX_RATE_UP = 3;
+const int GM_MAX_RATE_DOWN = 3;
 const int GM_DRIVER_TORQUE_ALLOWANCE = 50;
 const int GM_DRIVER_TORQUE_FACTOR = 4;
 const int GM_MAX_GAS = 3072;
@@ -26,6 +26,7 @@ AddrCheckStruct gm_rx_checks[] = {
   {.addr = {842}, .bus = 0, .expected_timestep = 100000U},
   {.addr = {481}, .bus = 0, .expected_timestep = 100000U},
   {.addr = {241}, .bus = 0, .expected_timestep = 100000U},
+  {.addr = {417}, .bus = 0, .expected_timestep = 100000U},
 };
 const int GM_RX_CHECK_LEN = sizeof(gm_rx_checks) / sizeof(gm_rx_checks[0]);
 
@@ -56,6 +57,8 @@ static int gm_rx_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     if (addr == 481) {
       int button = (GET_BYTE(to_push, 5) & 0x70) >> 4;
       switch (button) {
+        case 2:  // resume
+        case 3:  // set
         case 5:  // main
           controls_allowed = 1;
           break;
