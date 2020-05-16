@@ -26,9 +26,8 @@ extern uint32_t can_speed[4];
 
 void can_set_forwarding(int from, int to);
 
-bool can_init(uint8_t can_number);
+void can_init(uint8_t can_number);
 void can_init_all(void);
-bool can_tx_check_min_slots_free(uint32_t min);
 void can_send(CAN_FIFOMailBox_TypeDef *to_push, uint8_t bus_number, bool skip_tx_hook);
 bool can_pop(can_ring *q, CAN_FIFOMailBox_TypeDef *elem);
 
@@ -108,20 +107,6 @@ bool can_push(can_ring *q, CAN_FIFOMailBox_TypeDef *elem) {
   return ret;
 }
 
-uint32_t can_slots_empty(can_ring *q) {
-  uint32_t ret = 0;
-
-  ENTER_CRITICAL();
-  if (q->w_ptr >= q->r_ptr) {
-    ret = q->fifo_size - 1U - q->w_ptr + q->r_ptr;
-  } else {
-    ret = q->r_ptr - q->w_ptr - 1U;
-  }
-  EXIT_CRITICAL();
-
-  return ret;
-}
-
 void can_clear(can_ring *q) {
   ENTER_CRITICAL();
   q->w_ptr = 0;
@@ -148,27 +133,27 @@ uint32_t can_speed[] = {5000, 5000, 5000, 333};
 
 #define CANIF_FROM_CAN_NUM(num) (cans[num])
 #define CAN_NUM_FROM_CANIF(CAN) ((CAN)==CAN1 ? 0 : ((CAN) == CAN2 ? 1 : 2))
+#define CAN_NAME_FROM_CANIF(CAN) ((CAN)==CAN1 ? "CAN1" : ((CAN) == CAN2 ? "CAN2" : "CAN3"))
 #define BUS_NUM_FROM_CAN_NUM(num) (bus_lookup[num])
 #define CAN_NUM_FROM_BUS_NUM(num) (can_num_lookup[num])
 
 void process_can(uint8_t can_number);
 
-bool can_set_speed(uint8_t can_number) {
-  bool ret = true;
+void can_set_speed(uint8_t can_number) {
   CAN_TypeDef *CAN = CANIF_FROM_CAN_NUM(can_number);
   uint8_t bus_number = BUS_NUM_FROM_CAN_NUM(can_number);
 
-  ret &= llcan_set_speed(CAN, can_speed[bus_number], can_loopback, (unsigned int)(can_silent) & (1U << can_number));
-  return ret;
+  if (!llcan_set_speed(CAN, can_speed[bus_number], can_loopback, (unsigned int)(can_silent) & (1U << can_number))) {
+    puts("CAN init FAILED!!!!!\n");
+    puth(can_number); puts(" ");
+    puth(BUS_NUM_FROM_CAN_NUM(can_number)); puts("\n");
+  }
 }
 
 void can_init_all(void) {
-  bool ret = true;
   for (uint8_t i=0U; i < CAN_MAX; i++) {
-    can_clear(can_queues[i]);
-    ret &= can_init(i);
+    can_init(i);
   }
-  UNUSED(ret);
 }
 
 void can_flip_buses(uint8_t bus1, uint8_t bus2){
@@ -194,8 +179,7 @@ void can_set_gmlan(uint8_t bus) {
           bus_lookup[prev_bus] = prev_bus;
           can_num_lookup[prev_bus] = prev_bus;
           can_num_lookup[3] = -1;
-          bool ret = can_init(prev_bus);
-          UNUSED(ret);
+          can_init(prev_bus);
           break;
         default:
           // GMLAN was not set on either BUS 1 or 2
@@ -214,8 +198,7 @@ void can_set_gmlan(uint8_t bus) {
         bus_lookup[bus] = 3;
         can_num_lookup[bus] = -1;
         can_num_lookup[3] = bus;
-        bool ret = can_init(bus);
-        UNUSED(ret);
+        can_init(bus);
         break;
       case 0xFF:  //-1 unsigned
         break;
@@ -334,10 +317,6 @@ void process_can(uint8_t can_number) {
         CAN->sTxMailBox[0].TDHR = to_send.RDHR;
         CAN->sTxMailBox[0].TDTR = to_send.RDTR;
         CAN->sTxMailBox[0].TIR = to_send.RIR;
-
-        if (can_tx_check_min_slots_free(MAX_CAN_MSGS_PER_BULK_TRANSFER)) {
-          usb_outep3_resume_if_paused();
-        }
       }
     }
 
@@ -362,6 +341,11 @@ void ignition_can_hook(CAN_FIFOMailBox_TypeDef *to_push) {
     if ((addr == 0x348) && (len == 8)) {
       // GTW_status
       ignition_can = (GET_BYTE(to_push, 0) & 0x1) != 0;
+    }
+    // Cadillac exception
+    if ((addr == 0x160) && (len == 5)) {
+      // this message isn't all zeros when ignition is on
+      ignition_can = GET_BYTES_04(to_push) != 0;
     }
   }
 }
@@ -421,12 +405,23 @@ void CAN3_TX_IRQ_Handler(void) { process_can(2); }
 void CAN3_RX0_IRQ_Handler(void) { can_rx(2); }
 void CAN3_SCE_IRQ_Handler(void) { can_sce(CAN3); }
 
-bool can_tx_check_min_slots_free(uint32_t min) {
-  return
-    (can_slots_empty(&can_tx1_q) >= min) &&
-    (can_slots_empty(&can_tx2_q) >= min) &&
-    (can_slots_empty(&can_tx3_q) >= min) &&
-    (can_slots_empty(&can_txgmlan_q) >= min);
+void pump_send(pump_hook hook) {
+  uint8_t bus_number = 0U;
+  if (hook == NULL) return;
+  CAN_FIFOMailBox_TypeDef *to_push = hook();
+  if (to_push != NULL) {
+    if (bus_number < BUS_MAX) {
+      // add CAN packet to send queuesend
+      // bus number isn't passed through
+      to_push->RDTR &= 0xF;
+      if ((bus_number == 3U) && (can_num_lookup[3] == 0xFFU)) {
+        gmlan_send_errs += bitbang_gmlan(to_push) ? 0U : 1U;
+      } else {
+        can_fwd_errs += can_push(can_queues[bus_number], to_push) ? 0U : 1U;
+        process_can(CAN_NUM_FROM_BUS_NUM(bus_number));
+      }
+    }
+  }
 }
 
 void can_send(CAN_FIFOMailBox_TypeDef *to_push, uint8_t bus_number, bool skip_tx_hook) {
@@ -449,9 +444,7 @@ void can_set_forwarding(int from, int to) {
   can_forwarding[from] = to;
 }
 
-bool can_init(uint8_t can_number) {
-  bool ret = false;
-
+void can_init(uint8_t can_number) {
   REGISTER_INTERRUPT(CAN1_TX_IRQn, CAN1_TX_IRQ_Handler, CAN_INTERRUPT_RATE, FAULT_INTERRUPT_RATE_CAN_1)
   REGISTER_INTERRUPT(CAN1_RX0_IRQn, CAN1_RX0_IRQ_Handler, CAN_INTERRUPT_RATE, FAULT_INTERRUPT_RATE_CAN_1)
   REGISTER_INTERRUPT(CAN1_SCE_IRQn, CAN1_SCE_IRQ_Handler, CAN_INTERRUPT_RATE, FAULT_INTERRUPT_RATE_CAN_1)
@@ -464,11 +457,12 @@ bool can_init(uint8_t can_number) {
 
   if (can_number != 0xffU) {
     CAN_TypeDef *CAN = CANIF_FROM_CAN_NUM(can_number);
-    ret &= can_set_speed(can_number);
-    ret &= llcan_init(CAN);
+    can_set_speed(can_number);
+
+    llcan_init(CAN);
+
     // in case there are queued up messages
     process_can(can_number);
   }
-  return ret;
 }
 

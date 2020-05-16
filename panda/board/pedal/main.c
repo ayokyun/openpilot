@@ -76,7 +76,6 @@ void usb_cb_ep3_out(void *usbdata, int len, bool hardwired) {
   UNUSED(len);
   UNUSED(hardwired);
 }
-void usb_cb_ep3_out_complete(void) {}
 void usb_cb_enumeration_complete(void) {}
 
 int usb_cb_control_msg(USB_Setup_TypeDef *setup, uint8_t *resp, bool hardwired) {
@@ -316,8 +315,7 @@ int main(void) {
     puts("Failed to set llcan speed");
   }
 
-  bool ret = llcan_init(CAN1);
-  UNUSED(ret);
+  llcan_init(CAN1);
 
   // 48mhz / 65536 ~= 732
   timer_init(TIM3, 15);

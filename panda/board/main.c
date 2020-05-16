@@ -235,12 +235,6 @@ void usb_cb_ep3_out(void *usbdata, int len, bool hardwired) {
   }
 }
 
-void usb_cb_ep3_out_complete() {
-  if (can_tx_check_min_slots_free(MAX_CAN_MSGS_PER_BULK_TRANSFER)) {
-    usb_outep3_resume_if_paused();
-  }
-}
-
 void usb_cb_enumeration_complete() {
   puts("USB enumeration complete\n");
   is_enumerated = 1;
@@ -472,17 +466,7 @@ int usb_cb_control_msg(USB_Setup_TypeDef *setup, uint8_t *resp, bool hardwired) 
     case 0xde:
       if (setup->b.wValue.w < BUS_MAX) {
         can_speed[setup->b.wValue.w] = setup->b.wIndex.w;
-        bool ret = can_init(CAN_NUM_FROM_BUS_NUM(setup->b.wValue.w));
-        UNUSED(ret);
-      }
-      break;
-    // **** 0xdf: set unsafe mode
-    case 0xdf:
-      // you can only set this if you are in a non car safety mode
-      if ((current_safety_mode == SAFETY_SILENT) ||
-          (current_safety_mode == SAFETY_NOOUTPUT) ||
-          (current_safety_mode == SAFETY_ELM327)) {
-        unsafe_mode = setup->b.wValue.w;
+        can_init(CAN_NUM_FROM_BUS_NUM(setup->b.wValue.w));
       }
       break;
     // **** 0xe0: uart read
@@ -674,6 +658,16 @@ void __attribute__ ((noinline)) enable_fpu(void) {
 // go into SILENT when the EON does not send a heartbeat for this amount of seconds.
 #define EON_HEARTBEAT_IGNITION_CNT_ON 5U
 #define EON_HEARTBEAT_IGNITION_CNT_OFF 2U
+
+//Message Pump IRQ Handler
+void TIM7_IRQHandler(void) {
+  if (TIM7->SR != 0) {
+    if (message_pump_hook != NULL) {
+      pump_send(message_pump_hook);
+    }
+  }
+  TIM7->SR = 0;
+}
 
 // called at 1Hz
 void TIM1_BRK_TIM9_IRQ_Handler(void) {
