@@ -133,11 +133,21 @@ class CarInterface(CarInterfaceBase):
     self.cp.update_strings(can_strings)
 
     ret = self.CS.update(self.cp)
+    ret.cruiseState.available = self.CS.main_on
+    ret.cruiseState.enabled = self.CS.main_on
 
     ret.canValid = self.cp.can_valid
     ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
 
-    events = self.create_common_events(ret, pcm_enable=False)
+    events = self.create_common_events(ret)
+
+    if not ret.cruiseState.available:
+      events.append(create_event('wrongCarMode', [ET.NO_ENTRY, ET.USER_DISABLE]))
+
+    if ret.cruiseState.enabled and not self.cruise_enable_prev:
+      events.append(create_event('pcmEnable', [ET.ENABLE]))
+    elif not ret.cruiseState.enabled:
+      events.append(create_event('pcmDisable', [ET.USER_DISABLE]))
 
     if ret.vEgo < self.CP.minEnableSpeed:
       events.append(create_event('speedTooLow', [ET.NO_ENTRY]))
@@ -146,6 +156,7 @@ class CarInterface(CarInterfaceBase):
 
     ret.events = events
 
+    self.cruise_enable_prev = ret.cruiseState.enabled
     # copy back carState packet to CS
     self.CS.out = ret.as_reader()
 

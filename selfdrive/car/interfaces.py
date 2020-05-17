@@ -24,6 +24,7 @@ class CarInterfaceBase():
 
     self.frame = 0
     self.low_speed_alert = False
+    self.cruise_enable_prev = False
 
     self.CS = CarState(CP)
     self.cp = self.CS.get_can_parser(CP)
@@ -115,7 +116,7 @@ class CarInterfaceBase():
         self.dp_last_modified = modified
       self.ts_last_check = ts
 
-  def create_common_events(self, cs_out, extra_gears=[], gas_resume_speed=-1, pcm_enable=True):
+  def create_common_events(self, cs_out, extra_gears=[], gas_resume_speed=-1):
     events = []
 
     if cs_out.doorOpen:
@@ -127,8 +128,6 @@ class CarInterfaceBase():
         events.append(create_event('wrongGear', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
       if cs_out.gearShifter == GearShifter.reverse:
         events.append(create_event('reverseGear', [ET.NO_ENTRY, ET.IMMEDIATE_DISABLE]))
-    if not cs_out.cruiseState.available:
-      events.append(create_event('wrongCarMode', [ET.NO_ENTRY, ET.USER_DISABLE]))
     if cs_out.espDisabled:
       events.append(create_event('espDisabled', [ET.NO_ENTRY, ET.SOFT_DISABLE]))
     if cs_out.gasPressed and not self.dragon_allow_gas and not self.dragon_toyota_stock_dsu:
@@ -151,13 +150,6 @@ class CarInterfaceBase():
       else:
         if cs_out.brakePressed and (not self.CS.out.gasPressed or not cs_out.standstill):
           events.append(create_event('pedalPressed', [ET.NO_ENTRY, ET.USER_DISABLE]))
-
-    # we engage when pcm is active (rising edge)
-    if pcm_enable:
-      if cs_out.cruiseState.enabled and not self.CS.out.cruiseState.enabled:
-        events.append(create_event('pcmEnable', [ET.ENABLE]))
-      elif not cs_out.cruiseState.enabled:
-        events.append(create_event('pcmDisable', [ET.USER_DISABLE]))
 
     return events
 
