@@ -150,6 +150,25 @@ class CarInterface(CarInterfaceBase):
     ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
     ret.cruiseState.enabled = self.CS.main_on
 
+    buttonEvents = []
+
+    if self.CS.cruise_buttons != self.CS.prev_cruise_buttons and self.CS.prev_cruise_buttons != CruiseButtons.INIT:
+      be = car.CarState.ButtonEvent.new_message()
+      be.type = ButtonType.unknown
+      if self.CS.cruise_buttons != CruiseButtons.UNPRESS:
+        be.pressed = True
+        but = self.CS.cruise_buttons
+      else:
+        be.pressed = False
+        but = self.CS.prev_cruise_buttons
+
+      if but == CruiseButtons.DECEL_SET:
+        if not ret.cruiseState.enabled and not self.CS.lkMode:
+          self.lkMode = True
+        be.type = ButtonType.decelCruise
+      buttonEvents.append(be)
+
+    ret.buttonEvents = buttonEvents
     events = self.create_common_events(ret)
 
     if ret.cruiseState.enabled and not self.cruise_enabled_prev:
@@ -161,6 +180,11 @@ class CarInterface(CarInterfaceBase):
       events.append(create_event('speedTooLow', [ET.NO_ENTRY]))
     if self.CS.park_brake:
       events.append(create_event('parkBrake', [ET.NO_ENTRY, ET.USER_DISABLE]))
+
+    # handle button presses
+    for b in ret.buttonEvents:
+      if b.type == ButtonType.decelCruise and not b.pressed:
+        events.append(create_event('buttonEnable', [ET.ENABLE]))
 
     ret.events = events
 
